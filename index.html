@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0A0E0D">
+    <title>GeoVision AI - Detección Central de Figuras</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier@1.4.0/dist/knn-classifier.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = { theme: { extend: {
+            colors: { brand: {
+                dark: '#0A0E0D', card: '#111816', border: '#1E332D',
+                green: '#10B981', 'green-hover': '#059669',
+                blue: '#3B82F6', 'blue-hover': '#2563EB',
+                white: '#FFFFFF', muted: '#9CA3AF'
+            }},
+            fontFamily: { sans: ['Inter', 'sans-serif'] }
+        }}}
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0A0E0D; }
+        ::-webkit-scrollbar-thumb { background: #1E332D; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #10B981; }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.25); }
+            50% { box-shadow: 0 0 35px rgba(59, 130, 246, 0.45); }
+        }
+        .scanner-glow { animation: pulseGlow 3s infinite ease-in-out; }
+        @keyframes pulseRing {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.9; }
+            100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
+        }
+        .detection-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 45%;
+            aspect-ratio: 1;
+            border: 3px dashed rgba(16, 185, 129, 0.75);
+            border-radius: 50%;
+            pointer-events: none;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+            z-index: 10;
+        }
+        .detection-zone-inner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: rgba(16, 185, 129, 0.95);
+            border-radius: 50%;
+            box-shadow: 0 0 12px rgba(16, 185, 129, 1), 0 0 0 2px rgba(255,255,255,0.3);
+        }
+        .detection-zone-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 2px solid rgba(16, 185, 129, 0.5);
+            animation: pulseRing 2s infinite ease-out;
+        }
+        .detection-zone-label {
+            position: absolute;
+            bottom: -26px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(16, 185, 129, 0.95);
+            color: #0A0E0D;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body class="bg-brand-dark text-brand-white font-sans h-full flex flex-col antialiased overflow-x-hidden selection:bg-brand-green selection:text-brand-dark">
+
+    <header class="border-b border-brand-border bg-brand-card/90 backdrop-blur-md sticky top-0 z-50 px-4 lg:px-8 py-3 flex items-center justify-between shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-green to-brand-blue flex items-center justify-center text-brand-dark font-bold text-xl shadow-lg">
+                <i class="fa-solid fa-shapes"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-base tracking-tight text-brand-white flex items-center gap-2">
+                    GeoVision AI <span class="text-xs px-2 py-0.5 rounded-full bg-brand-green/20 text-brand-green font-medium border border-brand-green/30">Pro v3</span>
+                </h1>
+                <p class="text-xs text-brand-muted">Detección central de figuras geométricas</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3">
+            <div id="secure-badge" class="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-green/10 text-xs border border-brand-green/30">
+                <i class="fa-solid fa-lock text-brand-green"></i>
+                <span class="text-brand-green font-medium">Contexto Seguro</span>
+            </div>
+            <div id="model-status" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-border/40 text-xs border border-brand-border">
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" id="status-dot"></span>
+                <span id="status-text" class="text-brand-muted">Iniciando...</span>
+            </div>
+            <button onclick="openInfoModal()" class="w-9 h-9 rounded-lg bg-brand-border/60 hover:bg-brand-border text-brand-white flex items-center justify-center transition border border-brand-border">
+                <i class="fa-solid fa-circle-question"></i>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div class="lg:col-span-7 flex flex-col space-y-4">
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 scanner-glow relative overflow-hidden flex flex-col">
+                <div class="flex items-center justify-between mb-3 pb-2 border-b border-brand-border/60">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-crosshairs text-brand-green"></i>
+                        <h2 class="font-semibold text-sm text-brand-white">Punto de Detección</h2>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span id="fps-counter" class="text-xs font-mono text-brand-blue bg-brand-blue/10 px-2 py-0.5 rounded border border-brand-blue/20">0 FPS</span>
+                        <button onclick="restartCamera()" class="px-3 py-1 rounded-lg bg-brand-border hover:bg-brand-border/80 text-brand-white font-medium text-xs transition flex items-center gap-1.5 border border-brand-border">
+                            <i class="fa-solid fa-rotate-right"></i> Reiniciar
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mb-3 flex items-center justify-between bg-brand-dark/50 rounded-xl p-2.5 border border-brand-border">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-bullseye text-brand-green"></i>
+                        <div>
+                            <p class="text-xs font-bold text-brand-white">Centra la figura en el círculo verde</p>
+                            <p class="text-[10px] text-brand-muted">Solo se detecta lo que esté en el centro</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="relative w-full aspect-video bg-black/90 rounded-xl overflow-hidden border border-brand-border flex items-center justify-center">
+                    <video id="webcam" autoplay playsinline muted class="w-full h-full object-cover transform -scale-x-100"></video>
+                    <canvas id="output-canvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none transform -scale-x-100"></canvas>
+                    <canvas id="binary-canvas" class="absolute bottom-3 right-3 w-32 h-24 rounded-lg border border-brand-border opacity-80 pointer-events-none transform -scale-x-100"></canvas>
+
+                    <div class="detection-zone">
+                        <div class="detection-zone-ring"></div>
+                        <div class="detection-zone-inner"></div>
+                        <div class="detection-zone-label">Coloca la figura aquí</div>
+                    </div>
+
+                    <div id="cam-error-box" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-brand-card/95 hidden">
+                        <div class="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-400 text-2xl mb-3 border border-red-500/30">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                        </div>
+                        <h3 class="text-sm font-medium text-brand-white mb-1">Acceso a Cámara Bloqueado</h3>
+                        <p id="cam-error-msg" class="text-xs text-brand-muted max-w-xs mb-4">Verifica permisos HTTPS/localhost.</p>
+                        <button onclick="restartCamera()" class="px-4 py-2 rounded-xl bg-brand-green hover:bg-brand-green-hover text-brand-dark font-medium text-xs transition shadow-md">Intentar Nuevamente</button>
+                    </div>
+
+                    <div id="live-badge" class="absolute top-3 left-3 bg-brand-dark/90 backdrop-blur-md border border-brand-border px-3.5 py-2 rounded-xl text-xs flex items-center gap-2.5 shadow-xl">
+                        <span class="w-2.5 h-2.5 rounded-full bg-brand-green animate-ping"></span>
+                        <div>
+                            <span id="live-class-name" class="font-bold text-brand-white uppercase tracking-wider block">Buscando...</span>
+                            <span id="live-class-details" class="text-[10px] text-brand-muted font-mono">Coloca una figura</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3 bg-brand-dark/60 rounded-xl border border-brand-border p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-magnifying-glass text-brand-green"></i>
+                            <span class="text-xs font-bold text-brand-white">Figura Detectada</span>
+                        </div>
+                        <span id="learning-status-badge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-brand-border text-brand-muted">En espera</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div id="learning-shape-icon" class="w-12 h-12 rounded-xl bg-brand-border flex items-center justify-center text-brand-muted text-lg flex-shrink-0">
+                            <i class="fa-solid fa-question"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p id="learning-shape-name" class="text-sm font-bold text-brand-white truncate">Ninguna figura</p>
+                            <p id="learning-shape-detail" class="text-[10px] text-brand-muted font-mono truncate">Coloca una figura en el centro</p>
+                        </div>
+                        <div class="text-right flex-shrink-0">
+                            <div id="learning-confidence" class="text-lg font-bold text-brand-green font-mono">0%</div>
+                            <div class="text-[9px] text-brand-muted">confianza</div>
+                        </div>
+                    </div>
+                    <div class="mt-2 pt-2 border-t border-brand-border/60">
+                        <p class="text-[10px] text-brand-muted mb-1 font-semibold">Objeto real relacionado:</p>
+                        <p id="real-object-hint" class="text-xs font-medium text-brand-green">Esperando detección...</p>
+                    </div>
+                </div>
+
+                <div class="mt-3 grid grid-cols-3 gap-2.5">
+                    <button onclick="setAnalysisMode('auto')" id="mode-auto-btn" class="py-2.5 px-3 rounded-xl border border-brand-green bg-brand-green/10 text-brand-green text-xs font-semibold flex items-center justify-center gap-2 transition">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Auto
+                    </button>
+                    <button onclick="setAnalysisMode('train')" id="mode-train-btn" class="py-2.5 px-3 rounded-xl border border-brand-border bg-brand-card hover:bg-brand-border/40 text-brand-muted text-xs font-semibold flex items-center justify-center gap-2 transition">
+                        <i class="fa-solid fa-graduation-cap"></i> KNN
+                    </button>
+                    <button onclick="resetAllModels()" class="py-2.5 px-3 rounded-xl border border-brand-border bg-brand-card hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 text-brand-muted text-xs font-semibold flex items-center justify-center gap-2 transition">
+                        <i class="fa-solid fa-trash-can"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 flex flex-col space-y-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-chart-line text-brand-blue"></i>
+                        <h3 class="font-semibold text-sm text-brand-white">Confianza por Figura</h3>
+                    </div>
+                    <span id="top-prediction-label" class="text-xs font-bold text-brand-green bg-brand-green/10 px-2.5 py-1 rounded border border-brand-green/20">Esperando...</span>
+                </div>
+                <div id="confidence-bars" class="space-y-2 pt-1"></div>
+            </div>
+
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 flex flex-col space-y-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-ruler-combined text-brand-blue"></i>
+                        <h3 class="font-semibold text-sm text-brand-white">Métricas del Contorno</h3>
+                    </div>
+                </div>
+                <div id="metrics-grid" class="grid grid-cols-2 gap-2 text-xs"></div>
+            </div>
+
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 flex flex-col space-y-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-terminal text-brand-green"></i>
+                        <h3 class="font-semibold text-sm text-brand-white">Log</h3>
+                    </div>
+                    <button onclick="clearLogs()" class="text-[11px] text-brand-muted hover:text-brand-white px-2 py-1 rounded bg-brand-border/40 transition">Limpiar</button>
+                </div>
+                <div id="log-container" class="bg-brand-dark/80 rounded-xl p-3 h-24 overflow-y-auto font-mono text-[11px] text-brand-muted space-y-1.5 border border-brand-border/60">
+                    <div class="text-brand-green">[00:00:00] GeoVision AI iniciado.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-5 flex flex-col space-y-4">
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-1.5 flex gap-1">
+                <button onclick="switchCategory('2d')" id="tab-2d" class="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-brand-green text-brand-dark transition shadow-sm flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-vector-square"></i> 2D
+                </button>
+                <button onclick="switchCategory('3d')" id="tab-3d" class="flex-1 py-2.5 rounded-xl text-xs font-semibold text-brand-muted hover:text-brand-white transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-cube"></i> 3D
+                </button>
+            </div>
+
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 flex flex-col space-y-4">
+                <div class="flex items-center justify-between border-b border-brand-border/60 pb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-shapes text-brand-green"></i>
+                        <h3 class="font-semibold text-sm text-brand-white" id="manager-title">Biblioteca 2D</h3>
+                    </div>
+                    <span id="active-shape-badge" class="text-xs bg-brand-blue/20 text-brand-blue border border-brand-blue/30 px-2.5 py-0.5 rounded-md font-mono">Círculo</span>
+                </div>
+
+                <div id="shape-grid" class="grid grid-cols-2 gap-2.5"></div>
+
+                <div id="training-control-box" class="bg-brand-dark/60 rounded-xl border border-brand-border p-3.5 flex flex-col space-y-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-brain text-brand-green"></i>
+                            <span class="text-xs font-semibold text-brand-white">Entrenamiento Manual</span>
+                        </div>
+                        <span id="sample-count-badge" class="text-xs font-mono text-brand-muted bg-brand-border px-2 py-0.5 rounded">0</span>
+                    </div>
+                    <p class="text-xs text-brand-muted leading-relaxed">
+                        Selecciona la figura, colócala en el centro y captura muestras.
+                    </p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="trainCurrentShape()" class="py-2.5 px-3 rounded-xl bg-brand-green hover:bg-brand-green-hover text-brand-dark font-bold text-xs transition flex items-center justify-center gap-2 shadow-md">
+                            <i class="fa-solid fa-camera-rotate"></i> Capturar
+                        </button>
+                        <button onmousedown="startHoldTraining()" onmouseup="stopHoldTraining()" onmouseleave="stopHoldTraining()" ontouchstart="startHoldTraining()" ontouchend="stopHoldTraining()" class="py-2.5 px-3 rounded-xl bg-brand-blue hover:bg-brand-blue-hover text-brand-white font-bold text-xs transition flex items-center justify-center gap-2 shadow-md select-none">
+                            <i class="fa-solid fa-record-vinyl"></i> Mantener
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 flex flex-col space-y-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-microchip text-brand-blue"></i>
+                        <h3 class="font-semibold text-sm text-brand-white">Estado</h3>
+                    </div>
+                    <span id="total-samples-badge" class="text-xs font-mono text-brand-green">KNN: 0</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 pt-1">
+                    <div class="bg-brand-dark/50 rounded-xl p-3 border border-brand-border">
+                        <span class="text-xs text-brand-muted mb-1 block">Modo</span>
+                        <span id="stat-mode" class="text-xs font-bold text-brand-green uppercase">Automático</span>
+                    </div>
+                    <div class="bg-brand-dark/50 rounded-xl p-3 border border-brand-border">
+                        <span class="text-xs text-brand-muted mb-1 block">Detección</span>
+                        <span id="stat-top-pred" class="text-xs font-bold text-brand-white truncate">Ninguna</span>
+                    </div>
+                </div>
+                <div class="pt-2 border-t border-brand-border/60 space-y-2">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-brand-muted">Estabilidad:</span>
+                        <span id="stability-indicator" class="font-mono text-brand-blue">0/12</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-brand-card rounded-2xl border border-brand-border p-4 flex flex-col space-y-2">
+                <div class="flex items-center space-x-2 text-brand-white font-semibold text-xs mb-1">
+                    <i class="fa-solid fa-lightbulb text-amber-400"></i>
+                    <h4>Objetos reales y su figura</h4>
+                </div>
+                <ul class="text-xs text-brand-muted space-y-1 list-disc list-inside">
+                    <li>Tapa de botella / moneda → <strong>Círculo</strong></li>
+                    <li>Cara de caja / dado → <strong>Cuadrado</strong></li>
+                    <li>Cara de libro / celular → <strong>Rectángulo</strong></li>
+                    <li>Señal de tráfico → <strong>Triángulo</strong></li>
+                    <li>Pelota → <strong>Esfera</strong></li>
+                </ul>
+            </div>
+        </div>
+    </main>
+
+    <div id="info-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-brand-card rounded-2xl border border-brand-border max-w-lg w-full p-6 relative flex flex-col space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between pb-3 border-b border-brand-border">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-brand-green/20 text-brand-green flex items-center justify-center border border-brand-green/30">
+                        <i class="fa-solid fa-circle-info"></i>
+                    </div>
+                    <h3 class="font-bold text-brand-white text-base">Guía de Detección</h3>
+                </div>
+                <button onclick="closeInfoModal()" class="w-8 h-8 rounded-lg bg-brand-border/60 hover:bg-brand-border text-brand-muted hover:text-brand-white flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="text-xs text-brand-muted space-y-3 leading-relaxed max-h-96 overflow-y-auto pr-1">
+                <p><strong class="text-brand-white">Cómo usar:</strong> Coloca la figura geométrica (o el objeto con esa forma) <strong class="text-brand-green">dentro del círculo verde central</strong>. El sistema solo analizará esa región circular.</p>
+                <div>
+                    <h4 class="font-semibold text-brand-white mb-1">Objetos → Figuras:</h4>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li><strong>Tapa de botella, moneda, plato</strong> → Círculo</li>
+                        <li><strong>Cara de caja, dado, ventana</strong> → Cuadrado</li>
+                        <li><strong>Celular, libro, puerta</strong> → Rectángulo</li>
+                        <li><strong>Señal de tráfico, sándwich</strong> → Triángulo</li>
+                        <li><strong>Pelota, naranja</strong> → Esfera</li>
+                        <li><strong>Dado, caja de regalo</strong> → Cubo</li>
+                        <li><strong>Lata, vaso</strong> → Cilindro</li>
+                        <li><strong>Cono de helado, embudo</strong> → Cono</li>
+                    </ul>
+                </div>
+                <p class="text-[11px]"><strong class="text-brand-white">Consejo:</strong> Usa fondo contrastante. Si no detecta bien, entrena con KNN manual.</p>
+            </div>
+            <div class="pt-2 flex justify-end">
+                <button onclick="closeInfoModal()" class="px-4 py-2 rounded-xl bg-brand-green hover:bg-brand-green-hover text-brand-dark font-semibold text-xs transition">Entendido</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ============================================================
+// SHAPES DATA
+// ============================================================
+const shapesData = {
+    '2d': [
+        { id: 'circulo',    name: 'Círculo',    icon: 'fa-circle',            color: '#10B981', samples: 0 },
+        { id: 'cuadrado',   name: 'Cuadrado',   icon: 'fa-square',            color: '#3B82F6', samples: 0 },
+        { id: 'triangulo',  name: 'Triángulo',  icon: 'fa-play',              color: '#F59E0B', samples: 0 },
+        { id: 'rectangulo', name: 'Rectángulo', icon: 'fa-rectangle-xmark',   color: '#8B5CF6', samples: 0 },
+        { id: 'pentagono',  name: 'Pentágono',  icon: 'fa-pentagon',          color: '#EC4899', samples: 0 },
+        { id: 'custom2d',   name: 'Personalizado', icon: 'fa-question',       color: '#9CA3AF', samples: 0 }
+    ],
+    '3d': [
+        { id: 'esfera',     name: 'Esfera',     icon: 'fa-globe',             color: '#10B981', samples: 0 },
+        { id: 'cubo',       name: 'Cubo',       icon: 'fa-cube',              color: '#3B82F6', samples: 0 },
+        { id: 'cilindro',   name: 'Cilindro',   icon: 'fa-mountain',          color: '#8B5CF6', samples: 0 },
+        { id: 'piramide',   name: 'Pirámide',   icon: 'fa-landmark',          color: '#F59E0B', samples: 0 },
+        { id: 'cono',       name: 'Cono',       icon: 'fa-ice-cream',         color: '#06B6D4', samples: 0 },
+        { id: 'custom3d',   name: 'Personalizado 3D', icon: 'fa-gem',         color: '#9CA3AF', samples: 0 }
+    ]
+};
+
+const realObjectHints = {
+    'circulo':   'Tapa de botella, moneda, plato, CD, reloj',
+    'cuadrado':  'Cara de caja, dado, ventana, azulejo, post-it',
+    'rectangulo':'Celular, libro, puerta, pantalla, billete',
+    'triangulo': 'Señal de tráfico, sándwich, techo, escuadra',
+    'pentagono': 'Balón de fútbol, casa, señal de escuela',
+    'esfera':    'Pelota, naranja, manzana, globo terráqueo',
+    'cubo':      'Dado, caja de regalo, hielera, bloque',
+    'cilindro':  'Lata, vaso, rollo de papel, vela',
+    'piramide':  'Pirámide, techo de casa, trofeo',
+    'cono':      'Cono de helado, embudo, cono de tráfico',
+    'custom2d':  'Objeto personalizado 2D',
+    'custom3d':  'Objeto personalizado 3D',
+    'none':      'Esperando figura...'
+};
+
+// ============================================================
+// GLOBAL STATE
+// ============================================================
+let currentCategory = '2d';
+let activeShapeId = 'circulo';
+let analysisMode = 'auto';
+let net = null;
+let classifier = null;
+let isModelReady = false;
+const webcamElement = document.getElementById('webcam');
+const outputCanvas = document.getElementById('output-canvas');
+const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
+const binaryCanvas = document.getElementById('binary-canvas');
+binaryCanvas.width = 160; binaryCanvas.height = 120;
+const binaryCtx = binaryCanvas.getContext('2d');
+let isCamActive = false;
+let isTrainingHold = false;
+let holdInterval = null;
+let lastFrameTime = performance.now();
+let frameCount = 0;
+let camStream = null;
+
+let detectionHistory = [];
+const HISTORY_SIZE = 12;
+
+const analysisCanvas = document.createElement('canvas');
+analysisCanvas.width = 200; analysisCanvas.height = 150;
+const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
+
+const CENTER_ROI_SIZE = 0.55;
+const MAX_CENTER_DIST_FRACTION = 0.32;
+
+// ============================================================
+// SECURITY & PERMISSIONS
+// ============================================================
+async function checkSecureContext() {
+    const isSecure = window.isSecureContext || location.protocol === 'https:' ||
+                    location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const badge = document.getElementById('secure-badge');
+    if (!isSecure) {
+        badge.className = 'hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 text-xs border border-red-500/30';
+        badge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-400"></i><span class="text-red-400 font-medium">No Seguro — HTTPS requerido</span>';
+    }
+    return isSecure;
+}
+
+async function checkCameraPermission() {
+    if (!navigator.permissions || !navigator.permissions.query) return 'unknown';
+    try {
+        const result = await navigator.permissions.query({ name: 'camera' });
+        return result.state;
+    } catch (e) {
+        return 'unknown';
+    }
+}
+
+function addLog(message, type = 'info') {
+    const container = document.getElementById('log-container');
+    const timeStr = new Date().toTimeString().split(' ')[0];
+    const div = document.createElement('div');
+    div.className = type === 'error' ? 'text-red-400' : type === 'success' ? 'text-brand-green' :
+                    type === 'learn' ? 'text-brand-blue' : 'text-brand-muted';
+    div.innerHTML = `<span class="text-brand-green">[${timeStr}]</span> ${message}`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    while (container.children.length > 80) container.removeChild(container.firstChild);
+}
+function clearLogs() {
+    document.getElementById('log-container').innerHTML = '';
+    addLog("Logs limpiados.");
+}
+
+// ============================================================
+// INIT
+// ============================================================
+window.addEventListener('DOMContentLoaded', async () => {
+    await checkSecureContext();
+    renderShapeGrid();
+    updateManagerUI();
+    updateConfidenceBars({});
+    updateMetrics({});
+    await initCamera();
+    await initModels();
+});
+
+async function initModels() {
+    try {
+        updateStatus('loading', 'Cargando IA...');
+        addLog("Cargando MobileNet + KNN...");
+        classifier = knnClassifier.create();
+        try {
+            net = await mobilenet.load({ version: 2, alpha: 1.0 });
+            isModelReady = true;
+            updateStatus('ready', 'IA Activa');
+            addLog("✓ MobileNet v2 cargado.", 'success');
+        } catch (e) {
+            console.warn("MobileNet fallback:", e);
+            isModelReady = true;
+            updateStatus('ready', 'CV Puro');
+            addLog("MobileNet no disponible, CV puro activo.", 'info');
+        }
+    } catch (err) {
+        updateStatus('ready', 'CV Puro');
+        addLog(`IA limitada: ${err.message}`, 'error');
+    }
+}
+
+async function initCamera(retries = 2) {
+    try {
+        document.getElementById('cam-error-box').classList.add('hidden');
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error("getUserMedia no disponible. Se requiere HTTPS o localhost.");
+        }
+
+        if (camStream) camStream.getTracks().forEach(t => t.stop());
+        camStream = null;
+
+        const permState = await checkCameraPermission();
+        addLog(`Permiso de cámara: ${permState}`, permState === 'denied' ? 'error' : 'info');
+
+        if (permState === 'denied') {
+            throw Object.assign(new Error("Permiso denegado previamente. Restablece los permisos en el candado de la barra de direcciones."), { name: 'NotAllowedError' });
+        }
+
+        const constraints = {
+            video: {
+                width: { ideal: 640, min: 320 },
+                height: { ideal: 480, min: 240 },
+                facingMode: { ideal: 'environment' }
+            },
+            audio: false
+        };
+
+        try {
+            camStream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+            if (e.name === 'OverconstrainedError' || e.name === 'NotFoundError') {
+                addLog("Reintentando con cámara frontal...", 'info');
+                constraints.video.facingMode = 'user';
+                camStream = await navigator.mediaDevices.getUserMedia(constraints);
+            } else {
+                throw e;
+            }
+        }
+
+        webcamElement.srcObject = camStream;
+
+        await new Promise((resolve) => {
+            if (webcamElement.readyState >= 2) resolve();
+            else webcamElement.onloadedmetadata = () => resolve();
+        });
+
+        await webcamElement.play();
+        isCamActive = true;
+        updateStatus('ready', 'Cámara Activa');
+        addLog("✓ Cámara iniciada.", 'success');
+        requestAnimationFrame(processingLoop);
+    } catch (err) {
+        console.error("Webcam error:", err);
+        isCamActive = false;
+        document.getElementById('cam-error-box').classList.remove('hidden');
+
+        let msg = 'Error desconocido.';
+        if (err.name === 'NotAllowedError') {
+            msg = 'Permiso denegado. Haz clic en el candado 🔒 de la barra de direcciones y permite la cámara.';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+            msg = 'No se encontró ninguna cámara conectada.';
+        } else if (err.name === 'NotReadableError') {
+            msg = 'La cámara está siendo usada por otra aplicación. Ciérrala e intenta de nuevo.';
+        } else if (err.message) {
+            msg = err.message;
+        }
+        document.getElementById('cam-error-msg').textContent = msg;
+        updateStatus('error', 'Cámara Inactiva');
+        addLog(`Error: ${err.name || err.message}`, 'error');
+
+        if (retries > 0 && err.name !== 'NotAllowedError') {
+            addLog(`Reintentando en 1.5s... (${retries} restantes)`, 'info');
+            setTimeout(() => initCamera(retries - 1), 1500);
+        }
+    }
+}
+
+async function restartCamera() {
+    isCamActive = false;
+    if (camStream) camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+    await new Promise(r => setTimeout(r, 400));
+    await initCamera(3);
+}
+
+function updateStatus(state, text) {
+    const dot = document.getElementById('status-dot');
+    document.getElementById('status-text').textContent = text;
+    dot.className = "w-2.5 h-2.5 rounded-full " + (state === 'loading' ? "bg-amber-500 animate-pulse" : state === 'ready' ? "bg-brand-green" : "bg-red-500");
+}
+
+// ============================================================
+// SHAPE UI
+// ============================================================
+function renderShapeGrid() {
+    const grid = document.getElementById('shape-grid');
+    grid.innerHTML = '';
+    shapesData[currentCategory].forEach(shape => {
+        const isActive = shape.id === activeShapeId;
+        const btn = document.createElement('button');
+        btn.className = `p-3 rounded-xl border text-left transition flex items-center justify-between ${
+            isActive ? 'bg-brand-green/10 border-brand-green' : 'bg-brand-dark/40 border-brand-border hover:border-brand-border/80'
+        }`;
+        btn.onclick = () => selectShape(shape.id);
+        btn.innerHTML = `
+            <div class="flex items-center space-x-2.5 truncate">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs" style="background:${isActive ? shape.color : '#1E332D'};color:${isActive ? '#0A0E0D' : '#fff'}">
+                    <i class="fa-solid ${shape.icon}"></i>
+                </div>
+                <div class="truncate">
+                    <p class="text-xs font-bold text-brand-white truncate">${shape.name}</p>
+                    <p class="text-[10px] text-brand-muted font-mono">${shape.samples} muestras</p>
+                </div>
+            </div>
+            <div class="w-2 h-2 rounded-full" style="background:${isActive ? shape.color : '#1E332D'}"></div>
+        `;
+        grid.appendChild(btn);
+    });
+}
+
+function switchCategory(cat) {
+    currentCategory = cat;
+    document.getElementById('tab-2d').className = cat === '2d'
+        ? 'flex-1 py-2.5 rounded-xl text-xs font-semibold bg-brand-green text-brand-dark transition shadow-sm flex items-center justify-center gap-2'
+        : 'flex-1 py-2.5 rounded-xl text-xs font-semibold text-brand-muted hover:text-brand-white transition flex items-center justify-center gap-2';
+    document.getElementById('tab-3d').className = cat === '3d'
+        ? 'flex-1 py-2.5 rounded-xl text-xs font-semibold bg-brand-green text-brand-dark transition shadow-sm flex items-center justify-center gap-2'
+        : 'flex-1 py-2.5 rounded-xl text-xs font-semibold text-brand-muted hover:text-brand-white transition flex items-center justify-center gap-2';
+    document.getElementById('manager-title').textContent = cat === '2d' ? 'Biblioteca 2D' : 'Biblioteca 3D';
+    activeShapeId = shapesData[cat][0].id;
+    detectionHistory = [];
+    renderShapeGrid();
+    updateManagerUI();
+    addLog(`Categoría: ${cat.toUpperCase()}`);
+}
+function selectShape(id) {
+    activeShapeId = id;
+    renderShapeGrid();
+    updateManagerUI();
+    const s = getCurrentShapeObj();
+    addLog(`Forma activa: ${s ? s.name : id}`);
+}
+function getCurrentShapeObj() {
+    return [...shapesData['2d'], ...shapesData['3d']].find(s => s.id === activeShapeId);
+}
+function updateManagerUI() {
+    const s = getCurrentShapeObj();
+    if (!s) return;
+    document.getElementById('active-shape-badge').textContent = s.name;
+    document.getElementById('sample-count-badge').textContent = `${s.samples} muestras`;
+    updateTotalSamplesStats();
+}
+function updateTotalSamplesStats() {
+    let total = 0;
+    [...shapesData['2d'], ...shapesData['3d']].forEach(s => total += s.samples);
+    document.getElementById('total-samples-badge').textContent = `KNN: ${total}`;
+}
+function setAnalysisMode(mode) {
+    analysisMode = mode;
+    const autoBtn = document.getElementById('mode-auto-btn');
+    const trainBtn = document.getElementById('mode-train-btn');
+    if (mode === 'auto') {
+        autoBtn.className = "py-2.5 px-3 rounded-xl border border-brand-green bg-brand-green/10 text-brand-green text-xs font-semibold flex items-center justify-center gap-2 transition";
+        trainBtn.className = "py-2.5 px-3 rounded-xl border border-brand-border bg-brand-card hover:bg-brand-border/40 text-brand-muted text-xs font-semibold flex items-center justify-center gap-2 transition";
+        document.getElementById('stat-mode').textContent = "Automático";
+        addLog("Modo: Detección Automática");
+    } else {
+        trainBtn.className = "py-2.5 px-3 rounded-xl border border-brand-blue bg-brand-blue/10 text-brand-blue text-xs font-semibold flex items-center justify-center gap-2 transition";
+        autoBtn.className = "py-2.5 px-3 rounded-xl border border-brand-border bg-brand-card hover:bg-brand-border/40 text-brand-muted text-xs font-semibold flex items-center justify-center gap-2 transition";
+        document.getElementById('stat-mode').textContent = "KNN Manual";
+        addLog("Modo: KNN");
+    }
+}
+
+// ============================================================
+// TRAINING (KNN)
+// ============================================================
+async function trainCurrentShape() {
+    if (!net || !classifier || !isCamActive) { addLog("Modelo/cámara no listos.", 'error'); return; }
+    try {
+        const roi = extractCenterROI();
+        if (!roi) { addLog("Sin figura detectable en el centro.", 'error'); return; }
+        const activation = net.infer(roi, 'conv_preds');
+        const shape = getCurrentShapeObj();
+        classifier.addExample(activation, getShapeClassIndex(shape.id));
+        shape.samples++;
+        updateManagerUI();
+        renderShapeGrid();
+        addLog(`✓ Muestra: ${shape.name} (${shape.samples})`, 'success');
+    } catch (err) {
+        addLog(`Error: ${err.message}`, 'error');
+    }
+}
+function startHoldTraining() {
+    isTrainingHold = true;
+    trainCurrentShape();
+    holdInterval = setInterval(() => { if (isTrainingHold) trainCurrentShape(); }, 220);
+}
+function stopHoldTraining() {
+    isTrainingHold = false;
+    if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+}
+function getShapeClassIndex(id) {
+    return [...shapesData['2d'], ...shapesData['3d']].findIndex(s => s.id === id);
+}
+function getShapeByIdFromIndex(idx) {
+    const all = [...shapesData['2d'], ...shapesData['3d']];
+    return all[idx] || all[0];
+}
+function resetAllModels() {
+    if (classifier) classifier.clearAllClasses();
+    [...shapesData['2d'], ...shapesData['3d']].forEach(s => s.samples = 0);
+    detectionHistory = [];
+    updateManagerUI();
+    renderShapeGrid();
+    updateConfidenceBars({});
+    addLog("Memoria IA reiniciada.", 'success');
+}
+
+// ============================================================
+// CENTER ROI EXTRACTION
+// ============================================================
+function extractCenterROI() {
+    if (!webcamElement.videoWidth) return null;
+    const vw = webcamElement.videoWidth;
+    const vh = webcamElement.videoHeight;
+    const roiSize = Math.min(vw, vh) * CENTER_ROI_SIZE;
+    const sx = (vw - roiSize) / 2;
+    const sy = (vh - roiSize) / 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = 224; canvas.height = 224;
+    const c2d = canvas.getContext('2d');
+    c2d.drawImage(webcamElement, sx, sy, roiSize, roiSize, 0, 0, 224, 224);
+    return canvas;
+}
+
+// ============================================================
+// CV ENGINE
+// ============================================================
+function gaussianBlur(gray, w, h) {
+    const kernel = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+    const kSum = 16;
+    const out = new Uint8Array(w * h);
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            let sum = 0, k = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    sum += gray[(y + dy) * w + (x + dx)] * kernel[k++];
+                }
+            }
+            out[y * w + x] = sum / kSum;
+        }
+    }
+    for (let x = 0; x < w; x++) { out[x] = gray[x]; out[(h-1)*w + x] = gray[(h-1)*w + x]; }
+    for (let y = 0; y < h; y++) { out[y*w] = gray[y*w]; out[y*w + w-1] = gray[y*w + w-1]; }
+    return out;
+}
+
+function getCenterGrayscale() {
+    if (!webcamElement.videoWidth) return null;
+    const vw = webcamElement.videoWidth;
+    const vh = webcamElement.videoHeight;
+    const roiSize = Math.min(vw, vh) * CENTER_ROI_SIZE;
+    const sx = (vw - roiSize) / 2;
+    const sy = (vh - roiSize) / 2;
+
+    analysisCtx.drawImage(webcamElement, sx, sy, roiSize, roiSize, 0, 0, analysisCanvas.width, analysisCanvas.height);
+    const data = analysisCtx.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height).data;
+    const w = analysisCanvas.width, h = analysisCanvas.height;
+    let gray = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        gray[i] = (data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114) | 0;
+    }
+    gray = gaussianBlur(gray, w, h);
+    return { gray, w, h };
+}
+
+function otsuThreshold(gray) {
+    const hist = new Array(256).fill(0);
+    for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+    const total = gray.length;
+    let sum = 0;
+    for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+    for (let t = 0; t < 256; t++) {
+        wB += hist[t];
+        if (wB === 0) continue;
+        const wF = total - wB;
+        if (wF === 0) break;
+        sumB += t * hist[t];
+        const mB = sumB / wB;
+        const mF = (sum - sumB) / wF;
+        const between = wB * wF * (mB - mF) * (mB - mF);
+        if (between > maxVar) { maxVar = between; threshold = t; }
+    }
+    return threshold;
+}
+
+function findLargestBlob(binary, w, h) {
+    const labels = new Int32Array(w * h).fill(-1);
+    const blobs = [];
+    let currentLabel = 0;
+    const queue = new Int32Array(w * h);
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const idx = y * w + x;
+            if (binary[idx] === 1 && labels[idx] === -1) {
+                let head = 0, tail = 0;
+                queue[tail++] = idx;
+                labels[idx] = currentLabel;
+                const pixels = [];
+                let sumX = 0, sumY = 0;
+                while (head < tail) {
+                    const cur = queue[head++];
+                    pixels.push(cur);
+                    const cx = cur % w, cy = (cur / w) | 0;
+                    sumX += cx; sumY += cy;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = cx + dx, ny = cy + dy;
+                            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                            const nidx = ny * w + nx;
+                            if (binary[nidx] === 1 && labels[nidx] === -1) {
+                                labels[nidx] = currentLabel;
+                                queue[tail++] = nidx;
+                            }
+                        }
+                    }
+                }
+                const cxAvg = sumX / pixels.length;
+                const cyAvg = sumY / pixels.length;
+                blobs.push({ label: currentLabel, pixels, size: pixels.length, cx: cxAvg, cy: cyAvg });
+                currentLabel++;
+            }
+        }
+    }
+
+    if (blobs.length === 0) return null;
+
+    const centerX = w / 2, centerY = h / 2;
+    const maxAllowedDist = Math.min(w, h) * MAX_CENTER_DIST_FRACTION;
+
+    const nearCenterBlobs = blobs.filter(b => {
+        const dist = Math.hypot(b.cx - centerX, b.cy - centerY);
+        return dist <= maxAllowedDist && b.size >= 250;
+    });
+
+    if (nearCenterBlobs.length === 0) return null;
+
+    nearCenterBlobs.forEach(b => {
+        const dist = Math.hypot(b.cx - centerX, b.cy - centerY);
+        b.distToCenter = dist;
+        b.centerBonus = 1 - Math.min(1, dist / maxAllowedDist);
+        b.priorityScore = b.centerBonus * 1000 + b.size;
+    });
+    nearCenterBlobs.sort((a, b) => b.priorityScore - a.priorityScore);
+
+    return { blob: nearCenterBlobs[0], labels, totalBlobs: blobs.length, nearCenterCount: nearCenterBlobs.length };
+}
+
+function traceContour(blob, w) {
+    const pixels = blob.pixels;
+    if (pixels.length === 0) return [];
+    const pixelSet = new Set(pixels);
+    let start = pixels[0];
+    let startY = (start / w) | 0, startX = start % w;
+    for (const p of pixels) {
+        const py = (p / w) | 0, px = p % w;
+        if (py < startY || (py === startY && px < startX)) { start = p; startY = py; startX = px; }
+    }
+    const contour = [];
+    const dirs = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+    let curX = startX, curY = startY;
+    let prevDir = 7;
+    const maxIter = pixels.length * 4;
+    let iter = 0;
+    do {
+        contour.push([curX, curY]);
+        let found = false;
+        for (let i = 0; i < 8; i++) {
+            const d = (prevDir + 6 + i) % 8;
+            const nx = curX + dirs[d][0], ny = curY + dirs[d][1];
+            if (nx < 0 || ny < 0) continue;
+            if (pixelSet.has(ny * w + nx)) {
+                curX = nx; curY = ny;
+                prevDir = d; found = true;
+                break;
+            }
+        }
+        if (!found) break;
+        iter++;
+    } while ((curX !== startX || curY !== startY) && iter < maxIter);
+    return contour;
+}
+
+function smoothContour(contour, window = 5) {
+    if (contour.length < window * 2) return contour;
+    const out = [];
+    const half = Math.floor(window / 2);
+    for (let i = 0; i < contour.length; i++) {
+        let sx = 0, sy = 0, n = 0;
+        for (let j = -half; j <= half; j++) {
+            const idx = (i + j + contour.length) % contour.length;
+            sx += contour[idx][0]; sy += contour[idx][1]; n++;
+        }
+        out.push([sx / n, sy / n]);
+    }
+    return out;
+}
+
+function approxPolyDP(points, epsilon) {
+    if (points.length < 3) return points.slice();
+    const first = points[0], last = points[points.length - 1];
+    let maxDist = 0, index = 0;
+    for (let i = 1; i < points.length - 1; i++) {
+        const d = perpendicularDistance(points[i], first, last);
+        if (d > maxDist) { maxDist = d; index = i; }
+    }
+    if (maxDist > epsilon) {
+        const left = approxPolyDP(points.slice(0, index + 1), epsilon);
+        const right = approxPolyDP(points.slice(index), epsilon);
+        return left.slice(0, -1).concat(right);
+    }
+    return [first, last];
+}
+function perpendicularDistance(p, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.sqrt(dx*dx + dy*dy);
+    if (len === 0) return Math.sqrt((p[0]-a[0])**2 + (p[1]-a[1])**2);
+    return Math.abs(dy * p[0] - dx * p[1] + b[0]*a[1] - b[1]*a[0]) / len;
+}
+function polygonArea(pts) {
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        area += pts[i][0] * pts[j][1];
+        area -= pts[j][0] * pts[i][1];
+    }
+    return Math.abs(area) / 2;
+}
+function polygonPerimeter(pts) {
+    let per = 0;
+    for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        per += Math.hypot(pts[j][0] - pts[i][0], pts[j][1] - pts[i][1]);
+    }
+    return per;
+}
+function polygonCentroid(pts) {
+    let cx = 0, cy = 0;
+    for (const p of pts) { cx += p[0]; cy += p[1]; }
+    return [cx / pts.length, cy / pts.length];
+}
+function boundingBox(pts) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) {
+        if (p[0] < minX) minX = p[0];
+        if (p[1] < minY) minY = p[1];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] > maxY) maxY = p[1];
+    }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+function convexHull(points) {
+    if (points.length < 3) return points.slice();
+    const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+    const lower = [];
+    for (const p of pts) {
+        while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+        lower.push(p);
+    }
+    const upper = [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+        const p = pts[i];
+        while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+        upper.push(p);
+    }
+    upper.pop(); lower.pop();
+    return lower.concat(upper);
+}
+
+function dedupeVertices(approx, minDist) {
+    const out = [];
+    for (const p of approx) {
+        if (out.length === 0) { out.push(p); continue; }
+        const last = out[out.length - 1];
+        const d = Math.hypot(p[0] - last[0], p[1] - last[1]);
+        if (d >= minDist) out.push(p);
+    }
+    if (out.length > 2) {
+        const first = out[0], last = out[out.length - 1];
+        if (Math.hypot(first[0] - last[0], first[1] - last[1]) < minDist) out.pop();
+    }
+    return out;
+}
+
+// ============================================================
+// FEATURE EXTRACTION
+// ============================================================
+function extractFeatures() {
+    const gs = getCenterGrayscale();
+    if (!gs) return null;
+    const { gray, w, h } = gs;
+    const baseThreshold = otsuThreshold(gray);
+
+    const thresholds = [
+        baseThreshold,
+        Math.max(30, baseThreshold - 20),
+        Math.min(225, baseThreshold + 20),
+        Math.max(50, Math.round(baseThreshold * 0.8)),
+        Math.min(200, Math.round(baseThreshold * 1.2))
+    ];
+
+    let best = null;
+
+    for (const thr of thresholds) {
+        for (const invert of [false, true]) {
+            const binary = new Uint8Array(w * h);
+            for (let i = 0; i < gray.length; i++) {
+                const v = gray[i] > thr ? 1 : 0;
+                binary[i] = invert ? 1 - v : v;
+            }
+            const result = findLargestBlob(binary, w, h);
+            if (!result) continue;
+            const blob = result.blob;
+
+            const bbox = boundingBox(blob.pixels.map(p => [p % w, (p / w) | 0]));
+            if (bbox.w < 5 || bbox.h < 5) continue;
+            const fill = blob.size / (bbox.w * bbox.h);
+
+            let edgePixels = 0;
+            for (const p of blob.pixels) {
+                const px = p % w, py = (p / w) | 0;
+                if (px <= 2 || py <= 2 || px >= w - 3 || py >= h - 3) edgePixels++;
+            }
+            const touchesEdge = (edgePixels / blob.pixels.length) > 0.55;
+
+            const score = (blob.priorityScore || 0) *
+                          (0.5 + 0.5 * fill) *
+                          (touchesEdge ? 0.4 : 1) *
+                          (invert ? 0.92 : 1);
+
+            if (!best || score > best.score) {
+                best = { binary, blob, fill, touchesEdge, invert, score, threshold: thr };
+            }
+        }
+    }
+
+    if (!best) return null;
+    const { blob, binary } = best;
+
+    const img = binaryCtx.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) {
+        img.data[i*4] = binary[i] ? 100 : 10;
+        img.data[i*4+1] = binary[i] ? 200 : 10;
+        img.data[i*4+2] = binary[i] ? 150 : 10;
+        img.data[i*4+3] = 255;
+    }
+    binaryCtx.putImageData(img, 0, 0);
+
+    let contour = traceContour(blob, w);
+    if (contour.length < 15) return null;
+
+    contour = smoothContour(contour, 5);
+
+    const perimeter = polygonPerimeter(contour);
+    const area = blob.size;
+    const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
+
+    const epsilon = Math.max(1.8, 0.018 * perimeter);
+    let approx = approxPolyDP(contour, epsilon);
+
+    const minVertexDist = Math.max(3, Math.min(w, h) * 0.045);
+    approx = dedupeVertices(approx, minVertexDist);
+    let vertices = approx.length;
+
+    if (circularity > 0.87 && vertices >= 6) {
+        vertices = 0;
+    }
+
+    const hull = convexHull(contour);
+    const hullArea = polygonArea(hull);
+    const solidity = hullArea > 0 ? Math.min(1.0, area / hullArea) : 0;
+
+    const bbox = boundingBox(contour);
+    const aspect = bbox.h > 0 ? bbox.w / bbox.h : 1;
+    const aspectRatio = aspect > 1 ? aspect : 1 / aspect;
+
+    const [cx, cy] = polygonCentroid(contour);
+    const bins = 36;
+    const radial = new Array(bins).fill(0);
+    for (const p of contour) {
+        const dx = p[0] - cx, dy = p[1] - cy;
+        let ang = Math.atan2(dy, dx);
+        if (ang < 0) ang += 2 * Math.PI;
+        const bin = Math.min(bins - 1, Math.floor((ang / (2 * Math.PI)) * bins));
+        const r = Math.hypot(dx, dy);
+        if (r > radial[bin]) radial[bin] = r;
+    }
+    const nz = radial.filter(r => r > 0);
+    const rMean = nz.reduce((a, b) => a + b, 0) / (nz.length || 1);
+    const rStd = Math.sqrt(nz.reduce((a, b) => a + (b - rMean) ** 2, 0) / (nz.length || 1));
+    const radialCV = rMean > 0 ? rStd / rMean : 1;
+
+    const vertexAngles = approx.map(p => Math.atan2(p[1] - cy, p[0] - cx));
+    const angleGaps = [];
+    for (let i = 0; i < vertexAngles.length; i++) {
+        const j = (i + 1) % vertexAngles.length;
+        let gap = vertexAngles[j] - vertexAngles[i];
+        if (gap < 0) gap += 2 * Math.PI;
+        angleGaps.push(gap);
+    }
+    const gapMean = angleGaps.reduce((a, b) => a + b, 0) / (angleGaps.length || 1);
+    const gapStd = Math.sqrt(angleGaps.reduce((a, b) => a + (b - gapMean) ** 2, 0) / (angleGaps.length || 1));
+    const angleRegularity = gapMean > 0 ? Math.max(0, 1 - Math.min(gapStd / gapMean, 1)) : 0;
+
+    return {
+        vertices, circularity, solidity, aspectRatio, radialCV,
+        angleRegularity, fill: best.fill, area, perimeter, contour, approx, bbox,
+        w, h, centroid: [cx, cy],
+        thresholdUsed: best.threshold,
+        distToCenter: blob.distToCenter || 0
+    };
+}
+
+// ============================================================
+// SHAPE CLASSIFIER
+// ============================================================
+function classifyShape(f) {
+    const { vertices, circularity, solidity, aspectRatio, radialCV, angleRegularity } = f;
+
+    if (f.area < 250 || f.perimeter < 40) {
+        return { id: 'none', name: 'Sin figura', confidence: 0, color: '#6B7280', details: 'Coloca una figura en el centro' };
+    }
+
+    const is2D = currentCategory === '2d';
+    const scores = {};
+
+    if (is2D) {
+        scores.circulo = 0;
+        if (circularity > 0.78) scores.circulo += (circularity - 0.78) * 400;
+        if (radialCV < 0.22) scores.circulo += (0.22 - radialCV) * 300;
+        if (vertices === 0) scores.circulo += 55;
+        else if (vertices >= 6) scores.circulo += 25;
+        else if (vertices === 5) scores.circulo += 5;
+        if (aspectRatio < 1.18) scores.circulo += 25;
+        if (solidity > 0.92) scores.circulo += 15;
+
+        scores.cuadrado = 0;
+        if (vertices === 4) scores.cuadrado += 75;
+        else if (vertices === 3 || vertices === 5) scores.cuadrado += 12;
+        if (Math.abs(circularity - 0.78) < 0.14) scores.cuadrado += 30;
+        if (aspectRatio < 1.22) scores.cuadrado += 50;
+        if (angleRegularity > 0.65) scores.cuadrado += 25;
+        if (solidity > 0.85) scores.cuadrado += 15;
+
+        scores.rectangulo = 0;
+        if (vertices === 4) scores.rectangulo += 75;
+        else if (vertices === 3 || vertices === 5) scores.rectangulo += 12;
+        if (aspectRatio >= 1.25) scores.rectangulo += Math.min(70, (aspectRatio - 1) * 110);
+        if (Math.abs(circularity - 0.78) < 0.16) scores.rectangulo += 25;
+        if (solidity > 0.85) scores.rectangulo += 15;
+
+        scores.triangulo = 0;
+        if (vertices === 3) scores.triangulo += 90;
+        else if (vertices === 4) scores.triangulo += 8;
+        if (Math.abs(circularity - 0.60) < 0.18) scores.triangulo += 35;
+        if (solidity > 0.80) scores.triangulo += 25;
+
+        scores.pentagono = 0;
+        if (vertices === 5) scores.pentagono += 90;
+        if (Math.abs(circularity - 0.86) < 0.14) scores.pentagono += 35;
+        if (angleRegularity > 0.60) scores.pentagono += 25;
+    } else {
+        scores.esfera = 0;
+        if (circularity > 0.78) scores.esfera += (circularity - 0.78) * 400;
+        if (radialCV < 0.22) scores.esfera += (0.22 - radialCV) * 300;
+        if (vertices === 0 || vertices >= 6) scores.esfera += 45;
+        if (aspectRatio < 1.20) scores.esfera += 22;
+
+        scores.cubo = 0;
+        if (vertices >= 4 && vertices <= 8) scores.cubo += 65;
+        if (solidity > 0.80) scores.cubo += 30;
+        if (circularity > 0.50 && circularity < 0.90) scores.cubo += 28;
+        if (aspectRatio > 0.72 && aspectRatio < 1.48) scores.cubo += 20;
+
+        scores.cilindro = 0;
+        if (aspectRatio > 1.25) scores.cilindro += 65;
+        if (circularity > 0.55 && circularity < 0.92) scores.cilindro += 35;
+        if (solidity > 0.80) scores.cilindro += 22;
+
+        scores.piramide = 0;
+        if (vertices === 3 || vertices === 4) scores.piramide += 65;
+        if (circularity < 0.78) scores.piramide += 35;
+        if (solidity > 0.78) scores.piramide += 22;
+
+        scores.cono = 0;
+        if (vertices === 3 || vertices === 4) scores.cono += 55;
+        if (circularity > 0.50 && circularity < 0.82) scores.cono += 35;
+        if (aspectRatio > 1.10) scores.cono += 28;
+    }
+
+    let bestId = null, bestScore = 0;
+    for (const [id, score] of Object.entries(scores)) {
+        if (score > bestScore) { bestScore = score; bestId = id; }
+    }
+
+    if (!bestId || bestScore < 30) {
+        return { id: 'none', name: 'Figura no identificada', confidence: Math.round(bestScore), color: '#9CA3AF', details: `Score: ${bestScore.toFixed(0)}` };
+    }
+
+    const shape = [...shapesData['2d'], ...shapesData['3d']].find(s => s.id === bestId);
+    const confidence = Math.min(98, Math.round(bestScore));
+
+    return {
+        id: bestId,
+        name: shape ? shape.name : bestId,
+        confidence,
+        color: shape ? shape.color : '#10B981',
+        details: `V=${vertices} C=${circularity.toFixed(2)} A=${aspectRatio.toFixed(2)} S=${solidity.toFixed(2)}`,
+        scores
+    };
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+async function processingLoop() {
+    if (!isCamActive) return;
+    const now = performance.now();
+    frameCount++;
+    if (now - lastFrameTime >= 1000) {
+        document.getElementById('fps-counter').textContent = `${frameCount} FPS`;
+        frameCount = 0;
+        lastFrameTime = now;
+    }
+    if (webcamElement.videoWidth > 0 && outputCanvas.width !== webcamElement.videoWidth) {
+        outputCanvas.width = webcamElement.videoWidth;
+        outputCanvas.height = webcamElement.videoHeight;
+    }
+    ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+
+    const features = extractFeatures();
+
+    if (features) {
+        updateMetrics(features);
+        const result = classifyShape(features);
+
+        detectionHistory.push(result.id);
+        if (detectionHistory.length > HISTORY_SIZE) detectionHistory.shift();
+
+        const counts = {};
+        detectionHistory.forEach(id => counts[id] = (counts[id] || 0) + 1);
+        const stableId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+        const stability = counts[stableId] / detectionHistory.length;
+        const stabilityCount = counts[stableId];
+
+        const knnActive = classifier && classifier.getNumClasses() > 0 && net;
+        if (knnActive && stability >= 0.65) {
+            const minKnnConf = analysisMode === 'train' ? 50 : 65;
+            try {
+                const roi = extractCenterROI();
+                if (roi) {
+                    const activation = net.infer(roi, 'conv_preds');
+                    const knnResult = await classifier.predictClass(activation, 3);
+                    if (knnResult && knnResult.label !== undefined) {
+                        const knnShape = getShapeByIdFromIndex(parseInt(knnResult.label));
+                        const knnConf = Math.round((knnResult.confidences[knnResult.label] || 0) * 100);
+                        if (knnConf > minKnnConf && knnShape) {
+                            result.id = knnShape.id;
+                            result.name = knnShape.name;
+                            result.color = knnShape.color;
+                            result.confidence = Math.max(result.confidence, knnConf);
+                            result.details = `KNN(${knnConf}%) | ${result.details}`;
+                        }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        drawOverlay(features, result);
+        updateLiveBadge(result);
+        updateConfidenceBarsFromScores(result);
+        updateLearningPanel(result, stability, stabilityCount);
+    } else {
+        document.getElementById('live-class-name').textContent = 'Buscando...';
+        document.getElementById('live-class-details').textContent = 'Coloca una figura en el centro';
+        updateLearningPanel(null, 0, 0);
+    }
+
+    document.getElementById('stability-indicator').textContent = `${detectionHistory.length}/${HISTORY_SIZE}`;
+    if (isCamActive) requestAnimationFrame(processingLoop);
+}
+
+// ============================================================
+// OVERLAY DRAWING
+// ============================================================
+function drawOverlay(f, result) {
+    const w = outputCanvas.width, h = outputCanvas.height;
+
+    const roiCanvasW = w * CENTER_ROI_SIZE;
+    const roiCanvasH = h * CENTER_ROI_SIZE;
+    const roiCanvasX = (w - roiCanvasW) / 2;
+    const roiCanvasY = (h - roiCanvasH) / 2;
+    const roiScaleX = roiCanvasW / f.w;
+    const roiScaleY = roiCanvasH / f.h;
+
+    ctx.save();
+
+    ctx.strokeStyle = result.color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let i = 0; i < f.contour.length; i++) {
+        const p = f.contour[i];
+        const x = roiCanvasX + p[0] * roiScaleX;
+        const y = roiCanvasY + p[1] * roiScaleY;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = result.color + '25';
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    for (const p of f.approx) {
+        const x = roiCanvasX + p[0] * roiScaleX;
+        const y = roiCanvasY + p[1] * roiScaleY;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    const centerX = roiCanvasX + f.centroid[0] * roiScaleX;
+    const centerY = roiCanvasY + f.centroid[1] * roiScaleY;
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 14, 0, Math.PI * 2);
+    ctx.fillStyle = result.color + '30';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 7, 0, Math.PI * 2);
+    ctx.fillStyle = result.color;
+    ctx.fill();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(centerX - 10, centerY); ctx.lineTo(centerX + 10, centerY);
+    ctx.moveTo(centerX, centerY - 10); ctx.lineTo(centerX, centerY + 10);
+    ctx.stroke();
+
+    ctx.strokeStyle = result.color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    const bx = roiCanvasX + f.bbox.x * roiScaleX;
+    const by = roiCanvasY + f.bbox.y * roiScaleY;
+    const bw = f.bbox.w * roiScaleX;
+    const bh = f.bbox.h * roiScaleY;
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.setLineDash([]);
+
+    const labelText = `${result.name} ${result.confidence}%`;
+    ctx.font = 'bold 13px Inter, sans-serif';
+    const tw = ctx.measureText(labelText).width;
+    ctx.fillStyle = '#0A0E0D';
+    ctx.fillRect(bx, by - 25, tw + 12, 20);
+    ctx.fillStyle = result.color;
+    ctx.fillText(labelText, bx + 6, by - 10);
+
+    ctx.restore();
+}
+
+function updateLiveBadge(r) {
+    document.getElementById('live-class-name').textContent = r.name;
+    document.getElementById('live-class-details').textContent = r.details || '';
+    document.getElementById('stat-top-pred').textContent = r.name;
+    document.getElementById('top-prediction-label').textContent = `${r.name} (${r.confidence}%)`;
+}
+
+function updateMetrics(f) {
+    const grid = document.getElementById('metrics-grid');
+    if (!f || f.vertices === undefined) { grid.innerHTML = '<div class="col-span-2 text-brand-muted text-center py-2">Sin contorno detectado</div>'; return; }
+    const items = [
+        ['Vértices', f.vertices],
+        ['Circularidad', f.circularity.toFixed(3)],
+        ['Solidez', f.solidity.toFixed(3)],
+        ['Aspect Ratio', f.aspectRatio.toFixed(2)],
+        ['Radial CV', f.radialCV.toFixed(3)],
+        ['Dist. al centro', f.distToCenter.toFixed(1) + 'px']
+    ];
+    grid.innerHTML = items.map(([k, v]) => `
+        <div class="bg-brand-dark/50 rounded-lg p-2 border border-brand-border flex justify-between">
+            <span class="text-brand-muted">${k}</span>
+            <span class="text-brand-white font-mono font-bold">${v}</span>
+        </div>
+    `).join('');
+}
+
+function updateConfidenceBars(confidences) {
+    const container = document.getElementById('confidence-bars');
+    container.innerHTML = '';
+    [...shapesData['2d'], ...shapesData['3d']].forEach((shape, idx) => {
+        const val = confidences[idx] ? Math.round(confidences[idx] * 100) : 0;
+        createBarRow(container, shape, val);
+    });
+}
+
+function updateConfidenceBarsFromScores(result) {
+    const container = document.getElementById('confidence-bars');
+    container.innerHTML = '';
+    const scores = result.scores || {};
+    const list = shapesData[currentCategory];
+    list.forEach(shape => {
+        let val = 0;
+        if (scores[shape.id]) val = Math.min(98, Math.round(scores[shape.id]));
+        else if (shape.id === result.id) val = result.confidence;
+        createBarRow(container, shape, val, shape.id === result.id);
+    });
+}
+
+function createBarRow(container, shape, val, highlight = false) {
+    const row = document.createElement('div');
+    row.className = 'flex flex-col space-y-1';
+    row.innerHTML = `
+        <div class="flex justify-between text-xs">
+            <span class="${highlight ? 'text-brand-white font-bold' : 'text-brand-white font-medium'}">${shape.name}</span>
+            <span class="text-brand-muted font-mono">${val}%</span>
+        </div>
+        <div class="w-full h-2 rounded-full bg-brand-dark/80 overflow-hidden border border-brand-border">
+            <div class="h-full transition-all duration-300 rounded-full" style="width: ${val}%; background: ${highlight ? `linear-gradient(90deg, ${shape.color}, ${shape.color}cc)` : 'linear-gradient(90deg, #3B82F6, #10B981)'}"></div>
+        </div>
+    `;
+    container.appendChild(row);
+}
+
+// ============================================================
+// LEARNING PANEL
+// ============================================================
+function updateLearningPanel(result, stability, stabilityCount) {
+    const iconEl = document.getElementById('learning-shape-icon');
+    const nameEl = document.getElementById('learning-shape-name');
+    const detailEl = document.getElementById('learning-shape-detail');
+    const confEl = document.getElementById('learning-confidence');
+    const badgeEl = document.getElementById('learning-status-badge');
+    const hintEl = document.getElementById('real-object-hint');
+
+    if (!result || result.id === 'none') {
+        iconEl.style.background = '#1E332D';
+        iconEl.style.color = '#9CA3AF';
+        iconEl.innerHTML = '<i class="fa-solid fa-question"></i>';
+        nameEl.textContent = 'Ninguna figura';
+        detailEl.textContent = 'Coloca una figura en el centro';
+        confEl.textContent = '0%';
+        confEl.className = 'text-lg font-bold text-brand-muted font-mono';
+        badgeEl.textContent = 'En espera';
+        badgeEl.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-brand-border text-brand-muted';
+        hintEl.textContent = 'Esperando detección...';
+        hintEl.className = 'text-xs font-medium text-brand-muted';
+        return;
+    }
+
+    const shape = [...shapesData['2d'], ...shapesData['3d']].find(s => s.id === result.id);
+    iconEl.style.background = (shape ? shape.color : '#10B981') + '30';
+    iconEl.style.color = shape ? shape.color : '#10B981';
+    iconEl.innerHTML = `<i class="fa-solid ${shape ? shape.icon : 'fa-shapes'}"></i>`;
+    nameEl.textContent = result.name;
+    detailEl.textContent = `Estabilidad: ${stabilityCount}/${HISTORY_SIZE} | ${result.details || ''}`;
+    confEl.textContent = `${result.confidence}%`;
+    confEl.className = result.confidence > 55
+        ? 'text-lg font-bold text-brand-green font-mono'
+        : 'text-lg font-bold text-amber-400 font-mono';
+
+    const hint = realObjectHints[result.id] || 'Objeto desconocido';
+    hintEl.textContent = hint;
+    hintEl.className = 'text-xs font-medium text-brand-green';
+
+    if (stability >= 0.65 && result.confidence > 45) {
+        badgeEl.textContent = '✓ Detectado';
+        badgeEl.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-brand-green/20 text-brand-green border border-brand-green/30';
+    } else {
+        badgeEl.textContent = 'Estabilizando...';
+        badgeEl.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30';
+    }
+}
+
+function openInfoModal() { document.getElementById('info-modal').classList.remove('hidden'); }
+function closeInfoModal() { document.getElementById('info-modal').classList.add('hidden'); }
+</script>
+</body>
+</html>
